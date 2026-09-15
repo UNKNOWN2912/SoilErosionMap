@@ -1,0 +1,35 @@
+name: kerala_soil_erosion_monitor
+description: "Kerala Soil Erosion Monitor - Satellite-derived geospatial soil loss visualizer using RUSLE."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^2.6.1
+  flutter_map: ^8.3.2
+  latlong2: ^0.9.1
+  dio: ^5.8.0+1
+  fl_chart: ^0.70.2
+  google_fonts: ^6.2.1
+  intl: ^0.20.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  shared_preferences: ^2.3.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/data/
