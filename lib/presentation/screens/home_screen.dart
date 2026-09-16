@@ -3,12 +3,14 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../data/models/district_erosion_model.dart';
+import '../../data/models/taluk_erosion_model.dart';
 import '../state/map_providers.dart';
 import '../widgets/common/demo_data_banner.dart';
 import '../widgets/controls/map_legend_widget.dart';
 import '../widgets/controls/search_filter_bar.dart';
 import '../widgets/controls/time_slider_widget.dart';
 import '../widgets/details/district_summary_sheet.dart';
+import '../widgets/details/taluk_summary_sheet.dart';
 import '../widgets/map/kerala_map_view.dart';
 
 /// Main screen of the Kerala Soil Erosion Monitor application.
@@ -24,15 +26,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final MapController _mapController = MapController();
 
   void _onDistrictSelected(DistrictErosionModel district, bool isWideScreen) {
-    // Smoothly animate map center to the district's centroid
     _mapController.move(district.geometry.centroid, 8.8);
-
     if (!isWideScreen) {
-      _openMobileBottomSheet(district);
+      _openMobileDistrictSheet(district);
     }
   }
 
-  void _openMobileBottomSheet(DistrictErosionModel district) {
+  void _onTalukSelected(TalukErosionModel taluk, bool isWideScreen) {
+    _mapController.move(taluk.geometry.centroid, 10.2);
+    if (!isWideScreen) {
+      _openMobileTalukSheet(taluk);
+    }
+  }
+
+  void _openMobileDistrictSheet(DistrictErosionModel district) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -43,6 +50,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         maxChildSize: 0.92,
         builder: (_, scrollController) => DistrictSummarySheet(
           district: district,
+          onClose: () => Navigator.of(ctx).pop(),
+        ),
+      ),
+    );
+  }
+
+  void _openMobileTalukSheet(TalukErosionModel taluk) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.65,
+        minChildSize: 0.35,
+        maxChildSize: 0.92,
+        builder: (_, scrollController) => TalukSummarySheet(
+          taluk: taluk,
           onClose: () => Navigator.of(ctx).pop(),
         ),
       ),
@@ -70,9 +94,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     KeralaMapView(
                       mapController: _mapController,
                       onDistrictSelected: (d) => _onDistrictSelected(d, isWideScreen),
+                      onTalukSelected: (t) => _onTalukSelected(t, isWideScreen),
                     ),
 
-                    // 2. Top Bar (Search + Watermark)
+                    // 2. Top Bar (Search + Watermark + Region Selector)
                     Positioned(
                       top: MediaQuery.of(context).padding.top + 12,
                       left: 16,
@@ -86,6 +111,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               Expanded(
                                 child: SearchFilterBar(
                                   onDistrictSelected: (d) => _onDistrictSelected(d, isWideScreen),
+                                  onTalukSelected: (t) => _onTalukSelected(t, isWideScreen),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -121,6 +147,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   isSidePanel: true,
                   onClose: () {
                     ref.read(mapStateNotifierProvider.notifier).selectDistrict(null);
+                  },
+                ),
+
+              // Desktop / Tablet Side Panel for Taluk Details
+              if (isWideScreen && mapState.selectedTaluk != null)
+                TalukSummarySheet(
+                  taluk: mapState.selectedTaluk!,
+                  isSidePanel: true,
+                  onClose: () {
+                    ref.read(mapStateNotifierProvider.notifier).selectTaluk(null);
                   },
                 ),
             ],
@@ -159,7 +195,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Parsing district boundaries and satellite RUSLE layers',
+              'Parsing 61 taluk boundaries and satellite RUSLE layers',
               style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ],
@@ -193,6 +229,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onPressed: () {
                 ref.read(mapStateNotifierProvider.notifier).setDataSourceMode('bundled');
                 ref.invalidate(districtsDataProvider);
+                ref.invalidate(taluksDataProvider);
               },
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Load Offline Bundled GeoJSON'),

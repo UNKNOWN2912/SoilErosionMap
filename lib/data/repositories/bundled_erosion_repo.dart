@@ -1,12 +1,14 @@
 import '../datasources/local_geojson_source.dart';
 import '../models/district_erosion_model.dart';
+import '../models/taluk_erosion_model.dart';
 import 'erosion_repository.dart';
 
 /// Default offline-first repository utilizing pre-processed and research-backed
-/// Kerala district boundaries and RUSLE parameters.
+/// Kerala district and taluk boundaries and RUSLE parameters.
 class BundledErosionRepository implements ErosionRepository {
   final LocalGeoJsonSource _localSource;
   List<DistrictErosionModel>? _cachedMemoryDistricts;
+  List<TalukErosionModel>? _cachedMemoryTaluks;
 
   BundledErosionRepository({LocalGeoJsonSource? localSource})
       : _localSource = localSource ?? LocalGeoJsonSource();
@@ -32,6 +34,29 @@ class BundledErosionRepository implements ErosionRepository {
     final list = await getDistricts();
     try {
       return list.firstWhere((d) => d.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<List<TalukErosionModel>> getTaluks({String? districtName, String? year}) async {
+    if (_cachedMemoryTaluks == null || _cachedMemoryTaluks!.isEmpty) {
+      _cachedMemoryTaluks = await _localSource.loadBundledTaluks();
+    }
+    if (districtName != null && districtName.isNotEmpty) {
+      return _cachedMemoryTaluks!
+          .where((t) => t.districtName.toLowerCase() == districtName.toLowerCase())
+          .toList();
+    }
+    return _cachedMemoryTaluks!;
+  }
+
+  @override
+  Future<TalukErosionModel?> getTalukById(String id) async {
+    final list = await getTaluks();
+    try {
+      return list.firstWhere((t) => t.id == id);
     } catch (_) {
       return null;
     }

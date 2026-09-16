@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../datasources/hive_cache_service.dart';
 import '../models/district_erosion_model.dart';
+import '../models/taluk_erosion_model.dart';
 import 'bundled_erosion_repo.dart';
 import 'erosion_repository.dart';
 
@@ -96,6 +97,16 @@ class BhuvanWmsErosionRepository implements ErosionRepository {
     } catch (_) {
       return null;
     }
+  }
+
+  @override
+  Future<List<TalukErosionModel>> getTaluks({String? districtName, String? year}) async {
+    return _fallbackRepo.getTaluks(districtName: districtName, year: year);
+  }
+
+  @override
+  Future<TalukErosionModel?> getTalukById(String id) async {
+    return _fallbackRepo.getTalukById(id);
   }
 
   @override

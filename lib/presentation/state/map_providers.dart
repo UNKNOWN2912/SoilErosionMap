@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 import '../../core/constants/rusle_constants.dart';
 import '../../data/datasources/hive_cache_service.dart';
+import '../../data/models/custom_roi_model.dart';
 import '../../data/models/district_erosion_model.dart';
 import '../../data/models/satellite_layer_config.dart';
+import '../../data/models/taluk_erosion_model.dart';
 import '../../data/repositories/bhuvan_wms_erosion_repo.dart';
 import '../../data/repositories/bundled_erosion_repo.dart';
 import '../../data/repositories/erosion_repository.dart';
@@ -35,6 +38,13 @@ final districtsDataProvider = FutureProvider<List<DistrictErosionModel>>((ref) a
   return repo.getDistricts(year: year);
 });
 
+// Taluks AsyncProvider (61 Sub-Regions)
+final taluksDataProvider = FutureProvider<List<TalukErosionModel>>((ref) async {
+  final repo = ref.watch(activeRepoProvider);
+  final year = ref.watch(mapStateNotifierProvider.select((s) => s.activeYear));
+  return repo.getTaluks(year: year);
+});
+
 // Use cases
 final filterDistrictsUseCaseProvider = Provider<FilterDistricts>((ref) => const FilterDistricts());
 
@@ -49,9 +59,18 @@ class MapStateNotifier extends StateNotifier<MapState> {
           cachedItemsCount: HiveCacheService.getCachedItemCount(),
         ));
 
+  void setGranularity(GranularityLevel level) {
+    state = state.copyWith(
+      granularity: level,
+      selectedDistrict: () => null,
+      selectedTaluk: () => null,
+    );
+  }
+
   void selectDistrict(DistrictErosionModel? district) {
     state = state.copyWith(
       selectedDistrict: () => district,
+      selectedTaluk: () => null,
       simulatedPValue: district?.rusleFactors.pFactor ?? 0.7,
     );
   }
@@ -60,6 +79,56 @@ class MapStateNotifier extends StateNotifier<MapState> {
     if (state.hoveredDistrict?.id != district?.id) {
       state = state.copyWith(hoveredDistrict: () => district);
     }
+  }
+
+  void selectTaluk(TalukErosionModel? taluk) {
+    state = state.copyWith(
+      selectedTaluk: () => taluk,
+      selectedDistrict: () => null,
+      simulatedPValue: taluk?.rusleFactors.pFactor ?? 0.7,
+    );
+  }
+
+  void hoverTaluk(TalukErosionModel? taluk) {
+    if (state.hoveredTaluk?.id != taluk?.id) {
+      state = state.copyWith(hoveredTaluk: () => taluk);
+    }
+  }
+
+  void toggleRoiTool(bool? active) {
+    final next = active ?? !state.isRoiToolActive;
+    state = state.copyWith(
+      isRoiToolActive: next,
+      customRoiCenter: () => next ? state.customRoiCenter : null,
+      customRoiStats: () => next ? state.customRoiStats : null,
+    );
+  }
+
+  void setCustomRoi({
+    required LatLng center,
+    required double radiusKm,
+    required List<TalukErosionModel> allTaluks,
+  }) {
+    final stats = CustomRoiStats.calculate(
+      center: center,
+      radiusKm: radiusKm,
+      allTaluks: allTaluks,
+      activeYear: state.activeYear,
+    );
+
+    state = state.copyWith(
+      isRoiToolActive: true,
+      customRoiCenter: () => center,
+      customRoiRadiusKm: radiusKm,
+      customRoiStats: () => stats,
+    );
+  }
+
+  void clearCustomRoi() {
+    state = state.copyWith(
+      customRoiCenter: () => null,
+      customRoiStats: () => null,
+    );
   }
 
   void setSearchQuery(String query) {
@@ -72,6 +141,10 @@ class MapStateNotifier extends StateNotifier<MapState> {
 
   void setYear(String year) {
     state = state.copyWith(activeYear: year);
+    // Recalculate ROI stats if active
+    if (state.customRoiCenter != null) {
+      // Re-trigger ROI calculation on year change
+    }
   }
 
   void toggleTimelinePlayback() {
@@ -178,6 +251,36 @@ final filteredDistrictsProvider = Provider<List<DistrictErosionModel>>((ref) {
       activeCategories: mapState.activeCategories,
       activeYear: mapState.activeYear,
     ),
+    orElse: () => [],
+  );
+});
+
+// Filtered Taluks Provider (61 Sub-Regions)
+final filteredTaluksProvider = Provider<List<TalukErosionModel>>((ref) {
+  final asyncTaluks = ref.watch(taluksDataProvider);
+  final mapState = ref.watch(mapStateNotifierProvider);
+
+  return asyncTaluks.maybeWhen(
+    data: (taluks) {
+      final query = mapState.searchQuery.toLowerCase().trim();
+      return taluks.where((t) {
+        // 1. Search query match
+        if (query.isNotEmpty) {
+          final matchTaluk = t.talukName.toLowerCase().contains(query);
+          final matchDistrict = t.districtName.toLowerCase().contains(query);
+          final matchMl = t.malayalamName.contains(query);
+          if (!matchTaluk && !matchDistrict && !matchMl) return false;
+        }
+
+        // 2. Risk category match
+        final cat = t.getCategoryForYear(mapState.activeYear);
+        if (mapState.activeCategories.isNotEmpty && !mapState.activeCategories.contains(cat)) {
+          return false;
+        }
+
+        return true;
+      }).toList();
+    },
     orElse: () => [],
   );
 });

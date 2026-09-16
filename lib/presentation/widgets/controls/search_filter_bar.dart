@@ -2,17 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/district_erosion_model.dart';
+import '../../../data/models/taluk_erosion_model.dart';
 import '../../state/map_providers.dart';
+import '../../state/map_state.dart';
 import '../common/attribution_footer.dart';
 import '../common/data_source_dialog.dart';
 import 'layer_switcher_sheet.dart';
+import 'region_selector_dialog.dart';
 
-/// Top search bar with taluk/district autocompletion, layer quick-action,
-/// and fast category filters.
+/// Top search and region selection control bar with autocomplete,
+/// granularity switching (District vs Taluk), ROI area tool, and data settings.
 class SearchFilterBar extends ConsumerStatefulWidget {
   final void Function(DistrictErosionModel district)? onDistrictSelected;
+  final void Function(TalukErosionModel taluk)? onTalukSelected;
 
-  const SearchFilterBar({super.key, this.onDistrictSelected});
+  const SearchFilterBar({
+    super.key,
+    this.onDistrictSelected,
+    this.onTalukSelected,
+  });
 
   @override
   ConsumerState<SearchFilterBar> createState() => _SearchFilterBarState();
@@ -33,12 +41,18 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
   @override
   Widget build(BuildContext context) {
     final mapState = ref.watch(mapStateNotifierProvider);
+    final notifier = ref.read(mapStateNotifierProvider.notifier);
     final allDistrictsAsync = ref.watch(districtsDataProvider);
+    final allTaluksAsync = ref.watch(taluksDataProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final allDistricts = allDistrictsAsync.maybeWhen(
       data: (list) => list,
       orElse: () => <DistrictErosionModel>[],
+    );
+    final allTaluks = allTaluksAsync.maybeWhen(
+      data: (list) => list,
+      orElse: () => <TalukErosionModel>[],
     );
 
     // Filter suggestions based on query
@@ -48,14 +62,23 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
         : allDistricts.where((d) {
             final nameMatch = d.districtName.toLowerCase().contains(query);
             final mlMatch = d.malayalamName.contains(query);
-            final talukMatch = d.taluks.any((t) => t.toLowerCase().contains(query));
-            return nameMatch || mlMatch || talukMatch;
-          }).take(5).toList();
+            return nameMatch || mlMatch;
+          }).take(3).toList();
+
+    final matchingTaluks = query.isEmpty
+        ? <TalukErosionModel>[]
+        : allTaluks.where((t) {
+            final nameMatch = t.talukName.toLowerCase().contains(query);
+            final distMatch = t.districtName.toLowerCase().contains(query);
+            final mlMatch = t.malayalamName.contains(query);
+            return nameMatch || distMatch || mlMatch;
+          }).take(4).toList();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Main Search Card
+        // Top Main Search & Action Bar
         Container(
           decoration: BoxDecoration(
             color: isDark ? AppColors.darkSurface.withOpacity(0.95) : AppColors.lightSurface.withOpacity(0.95),
@@ -82,14 +105,14 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
                     controller: _controller,
                     focusNode: _focusNode,
                     decoration: const InputDecoration(
-                      hintText: 'Search district or taluk (e.g. Idukki, Devikulam, Vythiri)...',
+                      hintText: 'Search 61 taluks or 14 districts (e.g. Devikulam, Vythiri, Idukki)...',
                       hintStyle: TextStyle(fontSize: 13, color: Colors.grey),
                       border: InputBorder.none,
                       isDense: true,
                     ),
-                    style: const TextStyle(fontSize: 14),
+                    style: const TextStyle(fontSize: 13.5),
                     onChanged: (val) {
-                      ref.read(mapStateNotifierProvider.notifier).setSearchQuery(val);
+                      notifier.setSearchQuery(val);
                       setState(() {
                         _showSuggestions = val.isNotEmpty;
                       });
@@ -101,19 +124,53 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
                     icon: const Icon(Icons.clear_rounded, size: 18),
                     onPressed: () {
                       _controller.clear();
-                      ref.read(mapStateNotifierProvider.notifier).clearSearch();
+                      notifier.clearSearch();
                       setState(() {
                         _showSuggestions = false;
                       });
                     },
                   ),
-                const SizedBox(width: 4),
+
+                // Select Region Hierarchical Button
+                ElevatedButton.icon(
+                  onPressed: () {
+                    RegionSelectorDialog.show(
+                      context,
+                      onSelected: (district, taluk) {
+                        if (district != null) widget.onDistrictSelected?.call(district);
+                        if (taluk != null) widget.onTalukSelected?.call(taluk);
+                      },
+                    );
+                  },
+                  icon: const Icon(Icons.travel_explore_rounded, size: 16),
+                  label: const Text('Select Region', style: TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.forestGreenLight,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(width: 6),
+
+                // Custom ROI Tool Toggle Button
+                IconButton(
+                  tooltip: mapState.isRoiToolActive ? 'Exit Custom Area Tool' : 'Select Custom Area on Map (ROI)',
+                  icon: Icon(
+                    mapState.isRoiToolActive ? Icons.crop_free_rounded : Icons.crop_rounded,
+                    color: mapState.isRoiToolActive ? AppColors.lateriteTerracotta : Colors.grey,
+                  ),
+                  onPressed: () => notifier.toggleRoiTool(null),
+                ),
+
                 // Layer Switcher Button
                 IconButton(
                   tooltip: 'Satellite & Map Layers',
                   icon: const Icon(Icons.layers_outlined, color: AppColors.forestGreenLight),
                   onPressed: () => LayerSwitcherSheet.show(context),
                 ),
+
                 // Data Source Dialog Button
                 IconButton(
                   tooltip: 'Data Source Settings',
@@ -125,6 +182,7 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
                     );
                   },
                 ),
+
                 // Attribution Info
                 IconButton(
                   tooltip: 'Data Attribution',
@@ -136,8 +194,82 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
           ),
         ),
 
-        // Autocomplete Suggestion Overlay
-        if (_showSuggestions && matchingDistricts.isNotEmpty)
+        // Sub-Bar: Granularity Switcher Pills
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkSurface.withOpacity(0.92) : AppColors.lightSurface.withOpacity(0.92),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildGranularityChip(
+                    label: 'Districts (14)',
+                    level: GranularityLevel.district,
+                    active: mapState.granularity == GranularityLevel.district,
+                    onTap: () => notifier.setGranularity(GranularityLevel.district),
+                  ),
+                  const SizedBox(width: 4),
+                  _buildGranularityChip(
+                    label: 'Taluk Precision (61)',
+                    level: GranularityLevel.taluk,
+                    active: mapState.granularity == GranularityLevel.taluk,
+                    onTap: () => notifier.setGranularity(GranularityLevel.taluk),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (mapState.selectedTaluk != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.forestGreen.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.forestGreenLight, width: 1),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.check_circle_rounded, size: 14, color: AppColors.forestGreenLight),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Taluk: ${mapState.selectedTaluk!.talukName}',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.forestGreenLight),
+                    ),
+                  ],
+                ),
+              ),
+            if (mapState.selectedDistrict != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.lateriteTerracotta.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.lateriteTerracotta, width: 1),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.check_circle_rounded, size: 14, color: AppColors.lateriteTerracotta),
+                    const SizedBox(width: 6),
+                    Text(
+                      'District: ${mapState.selectedDistrict!.districtName}',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.lateriteTerracotta),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+
+        // Autocomplete Suggestions Dropdown
+        if (_showSuggestions && (matchingDistricts.isNotEmpty || matchingTaluks.isNotEmpty))
           Container(
             margin: const EdgeInsets.only(top: 6),
             decoration: BoxDecoration(
@@ -154,86 +286,101 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
                 color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
               ),
             ),
-            child: ListView.separated(
+            child: ListView(
               shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              itemCount: matchingDistricts.length,
-              separatorBuilder: (context, index) => Divider(
-                height: 1,
-                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              ),
-              itemBuilder: (context, index) {
-                final d = matchingDistricts[index];
-                final score = d.getScoreForYear(mapState.activeYear);
-                final category = d.getCategoryForYear(mapState.activeYear);
-                final color = AppColors.colorForErosionScore(score);
-
-                // Highlight matching taluks
-                final matchingTaluks = d.taluks
-                    .where((t) => t.toLowerCase().contains(query))
-                    .join(', ');
-
-                return ListTile(
-                  dense: true,
-                  leading: CircleAvatar(
-                    backgroundColor: color.withOpacity(0.25),
-                    child: Icon(Icons.place_rounded, color: color, size: 18),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              children: [
+                if (matchingTaluks.isNotEmpty) ...[
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(14, 6, 14, 2),
+                    child: Text('TALUKS (SUB-REGIONS)', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
                   ),
-                  title: Row(
-                    children: [
-                      Text(
-                        d.districtName,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ...matchingTaluks.map((t) {
+                    final score = t.getScoreForYear(mapState.activeYear);
+                    final cat = t.getCategoryForYear(mapState.activeYear);
+                    final color = AppColors.colorForErosionScore(score);
+
+                    return ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: 12,
+                        backgroundColor: color,
+                        child: Text(score.toStringAsFixed(0), style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        d.malayalamName,
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: color, width: 0.8),
-                        ),
-                        child: Text(
-                          '$category (${score.toStringAsFixed(1)})',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: color,
-                          ),
-                        ),
-                      ),
-                    ],
+                      title: Text('${t.talukName} (${t.districtName})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      subtitle: Text('Elev: ${t.elevationMeters.toInt()}m • Slope: ${t.slopeDegrees.toStringAsFixed(1)}° • $cat', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                      onTap: () {
+                        _controller.text = t.talukName;
+                        notifier.setGranularity(GranularityLevel.taluk);
+                        notifier.selectTaluk(t);
+                        setState(() => _showSuggestions = false);
+                        _focusNode.unfocus();
+                        widget.onTalukSelected?.call(t);
+                      },
+                    );
+                  }),
+                ],
+                if (matchingDistricts.isNotEmpty) ...[
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(14, 6, 14, 2),
+                    child: Text('DISTRICTS', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
                   ),
-                  subtitle: matchingTaluks.isNotEmpty
-                      ? Text(
-                          'Taluk match: $matchingTaluks',
-                          style: const TextStyle(fontSize: 11, color: AppColors.ochreClay),
-                        )
-                      : Text(
-                          d.dominantLandUse,
-                          style: const TextStyle(fontSize: 11, color: Colors.grey),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                  onTap: () {
-                    _controller.text = d.districtName;
-                    ref.read(mapStateNotifierProvider.notifier).selectDistrict(d);
-                    setState(() {
-                      _showSuggestions = false;
-                    });
-                    _focusNode.unfocus();
-                    widget.onDistrictSelected?.call(d);
-                  },
-                );
-              },
+                  ...matchingDistricts.map((d) {
+                    final score = d.getScoreForYear(mapState.activeYear);
+                    final cat = d.getCategoryForYear(mapState.activeYear);
+                    final color = AppColors.colorForErosionScore(score);
+
+                    return ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: 12,
+                        backgroundColor: color,
+                        child: Text(score.toStringAsFixed(0), style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                      title: Text('${d.districtName} (${d.malayalamName})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      subtitle: Text('${d.terrainCategory} • $cat (${score.toStringAsFixed(1)})', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                      onTap: () {
+                        _controller.text = d.districtName;
+                        notifier.setGranularity(GranularityLevel.district);
+                        notifier.selectDistrict(d);
+                        setState(() => _showSuggestions = false);
+                        _focusNode.unfocus();
+                        widget.onDistrictSelected?.call(d);
+                      },
+                    );
+                  }),
+                ],
+              ],
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildGranularityChip({
+    required String label,
+    required GranularityLevel level,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: active ? AppColors.forestGreenLight : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: active ? FontWeight.bold : FontWeight.w500,
+            color: active ? Colors.white : Colors.grey,
+          ),
+        ),
+      ),
     );
   }
 }
